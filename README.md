@@ -75,3 +75,4 @@ ngrok http 8000
 
 See `docs/superpowers/specs/` for the full design.
 # Neu-anchor
+# NeuAnchor-Meeting-assistant
