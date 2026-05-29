@@ -1,0 +1,14 @@
+{
+  "contentsDeltaUri": "gs://dr-ai-tool-meetings-1779878179/vector-index-init/",
+  "config": {
+    "dimensions": 768,
+    "approximateNeighborsCount": 50,
+    "distanceMeasureType": "DOT_PRODUCT_DISTANCE",
+    "algorithmConfig": {
+      "treeAhConfig": {
+        "leafNodeEmbeddingCount": 500,
+        "leafNodesToSearchPercent": 10
+      }
+    }
+  }
+}

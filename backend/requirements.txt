@@ -1,0 +1,30 @@
+# ── AI Meeting Assistant (GCP) ── backend requirements ──────────────────────
+# Python >= 3.10 recommended
+
+# ── Web framework ───────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9          # form / file uploads
+sse-starlette>=2.1.0             # Server-Sent Events for streaming chat
+
+# ── Async + HTTP ────────────────────────────────────────────────────────────
+httpx>=0.27.0                    # async HTTP client (Recall.ai calls)
+aiosqlite>=0.20.0                # async SQLite session store
+
+# ── Recording (offline mic capture) ─────────────────────────────────────────
+sounddevice>=0.4.6               # microphone capture
+soundfile>=0.12.1                # write WAV files
+numpy>=1.26.0
+
+# ── Transcription ───────────────────────────────────────────────────────────
+assemblyai>=0.30.0               # AssemblyAI SDK (speaker diarization)
+
+# ── Google Cloud ────────────────────────────────────────────────────────────
+google-genai>=1.0.0              # Unified GenAI SDK (Gemini 2.5 Pro via Vertex)
+google-cloud-aiplatform>=1.60.0  # Vertex AI Vector Search + embeddings
+google-cloud-storage>=2.16.0     # GCS artifact storage
+
+# ── Utilities ───────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0

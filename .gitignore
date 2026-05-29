@@ -1,0 +1,12 @@
+.env
+service-account.json
+*.db
+__pycache__/
+*.pyc
+
+# frontend
+node_modules/
+dist/
+
+# local audio
+*.wav

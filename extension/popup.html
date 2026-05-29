@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #0f1117;
+        color: #e6e8ee;
+        width: 340px;
+        margin: 0;
+        padding: 16px;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 12px;
+        color: #6c8cff;
+      }
+      label {
+        font-size: 12px;
+        color: #9aa0b0;
+        display: block;
+        margin-top: 8px;
+      }
+      input[type="text"],
+      input[type="file"] {
+        width: 100%;
+        padding: 8px;
+        background: #1a1d29;
+        color: #e6e8ee;
+        border: 1px solid #2a2e3e;
+        border-radius: 6px;
+        font-size: 13px;
+        box-sizing: border-box;
+      }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        margin: 12px 0 10px;
+      }
+      .tab {
+        flex: 1;
+        padding: 8px 4px;
+        background: transparent;
+        color: #9aa0b0;
+        border: 1px solid #2a2e3e;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .tab.active {
+        color: #e6e8ee;
+        border-color: #6c8cff;
+        background: rgba(108, 140, 255, 0.1);
+      }
+      .panel {
+        display: none;
+      }
+      .panel.active {
+        display: block;
+      }
+      .hint {
+        color: #9aa0b0;
+        font-size: 12px;
+        margin: 4px 0 8px;
+      }
+      button.primary {
+        width: 100%;
+        padding: 10px;
+        margin-top: 8px;
+        background: #6c8cff;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      button.primary.stop {
+        background: #ff5f6d;
+      }
+      .status {
+        margin-top: 12px;
+        padding: 8px;
+        font-size: 12px;
+        border-radius: 6px;
+        background: #1a1d29;
+        border: 1px solid #2a2e3e;
+      }
+      .status.error {
+        border-color: #ff5f6d;
+        color: #ff5f6d;
+      }
+      .status a {
+        color: #6c8cff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>AI Meeting Assistant</h1>
+
+    <label for="backend">Backend URL</label>
+    <input id="backend" type="text" placeholder="http://localhost:8000" />
+
+    <div class="tabs">
+      <button class="tab active" data-mode="tab">Online (tab audio)</button>
+      <button class="tab" data-mode="mic">Offline (mic)</button>
+      <button class="tab" data-mode="upload">Upload file</button>
+    </div>
+
+    <!-- ─── Online: tab audio capture ─────────────────────────────────── -->
+    <div class="panel active" data-panel="tab">
+      <p class="hint">
+        Records the audio of the currently active tab (e.g. a Google Meet you're
+        in). Captures all participants.
+      </p>
+      <button id="start-tab" class="primary">Start recording this tab</button>
+      <button id="stop-tab" class="primary stop" style="display: none">
+        Stop &amp; upload
+      </button>
+    </div>
+
+    <!-- ─── Offline: microphone capture ───────────────────────────────── -->
+    <div class="panel" data-panel="mic">
+      <p class="hint">
+        Records this device's microphone. Place the laptop between participants
+        so it captures everyone.
+      </p>
+      <button id="start-mic" class="primary">Start mic recording</button>
+      <button id="stop-mic" class="primary stop" style="display: none">
+        Stop &amp; upload
+      </button>
+    </div>
+
+    <!-- ─── Upload existing file ──────────────────────────────────────── -->
+    <div class="panel" data-panel="upload">
+      <p class="hint">
+        Upload a pre-recorded audio or video file (e.g. a downloaded Google Meet
+        recording).
+      </p>
+      <input id="file-input" type="file" accept="audio/*,video/*" />
+      <button id="start-upload" class="primary" style="margin-top: 8px">
+        Upload &amp; process
+      </button>
+    </div>
+
+    <div id="status" class="status" style="display: none"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
