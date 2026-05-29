@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Grant Microphone Access — AI Meeting Assistant</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #0f1117;
+        color: #e6e8ee;
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card {
+        background: #1a1d29;
+        border: 1px solid #2a2e3e;
+        border-radius: 12px;
+        padding: 32px;
+        width: 480px;
+        max-width: 90vw;
+      }
+      h1 {
+        color: #6c8cff;
+        margin-top: 0;
+      }
+      p {
+        line-height: 1.6;
+        color: #c5c8d1;
+      }
+      button {
+        padding: 12px 18px;
+        background: #6c8cff;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .ok {
+        margin-top: 16px;
+        padding: 12px;
+        background: rgba(76, 175, 133, 0.15);
+        border: 1px solid #4caf85;
+        color: #4caf85;
+        border-radius: 8px;
+      }
+      .err {
+        margin-top: 16px;
+        padding: 12px;
+        background: rgba(255, 95, 109, 0.15);
+        border: 1px solid #ff5f6d;
+        color: #ff5f6d;
+        border-radius: 8px;
+      }
+      code {
+        background: #0f1117;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Grant microphone access</h1>
+      <p>
+        The extension needs permission to use your microphone. Click the button
+        below — when Chrome shows the prompt, choose <b>Allow</b>.
+      </p>
+      <button id="grant">Grant microphone access</button>
+      <div id="result"></div>
+      <p style="margin-top: 24px; font-size: 12px; color: #9aa0b0">
+        If no prompt appears, mic was previously blocked. Open
+        <code>chrome://settings/content/microphone</code>, find the entry under
+        <i>Not allowed to use your microphone</i> for this extension, remove it,
+        then click the button again.
+      </p>
+    </div>
+    <script src="permission.js"></script>
+  </body>
+</html>

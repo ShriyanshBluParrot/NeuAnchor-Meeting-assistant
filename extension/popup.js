@@ -42,20 +42,37 @@ function setRecordingUI(source, recording) {
 
 // ─── Init ─────────────────────────────────────────────────────────────────
 async function loadDefaults() {
-  const { backendUrl, recording, recordingSource, lastSessionId } =
-    await chrome.storage.local.get([
-      "backendUrl",
-      "recording",
-      "recordingSource",
-      "lastSessionId",
-    ]);
+  const {
+    backendUrl,
+    recording,
+    recordingSource,
+    lastSessionId,
+    lastUploadError,
+    includeMic,
+    stopping,
+  } = await chrome.storage.local.get([
+    "backendUrl",
+    "recording",
+    "recordingSource",
+    "lastSessionId",
+    "lastUploadError",
+    "includeMic",
+    "stopping",
+  ]);
   const url = backendUrl || "http://localhost:8000";
   $("backend").value = url;
+  $("include-mic").checked = !!includeMic;
 
   if (recording && recordingSource) {
     showPanel(recordingSource);
     setRecordingUI(recordingSource, true);
     setStatus("Recording…");
+  } else if (stopping) {
+    // Upload is in progress in the background — keep showing it until done.
+    setStatus("Stopping & uploading…");
+    watchForUploadCompletion();
+  } else if (lastUploadError) {
+    setStatus(`Failed: ${lastUploadError}`, true);
   } else if (lastSessionId) {
     setStatus(uploadedLink(url, lastSessionId, "Last upload:"));
   }
@@ -74,6 +91,28 @@ async function startRecording(source) {
   if (source === "tab") {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     payload.tabId = tab.id;
+    payload.includeMic = $("include-mic").checked;
+  }
+
+  // For any mode that needs the mic, request the permission from the popup
+  // itself first. If it fails (often because Chrome cached a previous denial),
+  // open a dedicated permission page in a normal tab where the user can grant
+  // it cleanly — the popup itself can't reliably show a fresh prompt once a
+  // denial is cached for the extension's origin.
+  if (source === "mic" || payload.includeMic) {
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probe.getTracks().forEach((t) => t.stop());
+    } catch {
+      $(`start-${source}`).disabled = false;
+      const permUrl = chrome.runtime.getURL("permission.html");
+      setStatus(
+        `Microphone permission needed. <a href="${permUrl}" target="_blank">Open permission page</a> → click Allow, then try again.`,
+        true
+      );
+      chrome.tabs.create({ url: permUrl });
+      return;
+    }
   }
 
   const resp = await chrome.runtime.sendMessage(payload);
@@ -88,22 +127,44 @@ async function startRecording(source) {
 async function stopRecording(source) {
   setStatus("Stopping & uploading…");
   $(`stop-${source}`).disabled = true;
-  const resp = await chrome.runtime.sendMessage({ type: "stop" });
-  $(`stop-${source}`).disabled = false;
   setRecordingUI(source, false);
-
-  const url = $("backend").value.trim().replace(/\/$/, "");
-
-  if (!resp?.ok) return setStatus(`Failed: ${resp?.error ?? "unknown"}`, true);
-
-  if (!resp.sessionId) {
-    const { lastSessionId } = await chrome.storage.local.get("lastSessionId");
-    return lastSessionId
-      ? setStatus(uploadedLink(url, lastSessionId, "Already uploaded:"))
-      : setStatus("Nothing was recording.");
-  }
-  setStatus(uploadedLink(url, resp.sessionId));
+  // Fire-and-forget; the upload runs in the background. The storage watcher
+  // (attached in loadDefaults / below) reflects completion in the UI whenever
+  // the popup is open.
+  await chrome.runtime.sendMessage({ type: "stop" });
+  watchForUploadCompletion();
 }
+
+let _uploadWatcher = null;
+function watchForUploadCompletion() {
+  if (_uploadWatcher) return; // only one listener at a time
+  _uploadWatcher = (changes, area) => {
+    if (area !== "local" || !("stopping" in changes)) return;
+    if (changes.stopping.newValue !== false) return;
+    chrome.storage.onChanged.removeListener(_uploadWatcher);
+    _uploadWatcher = null;
+    showFinalUploadStatus();
+  };
+  chrome.storage.onChanged.addListener(_uploadWatcher);
+}
+
+async function showFinalUploadStatus() {
+  const { lastSessionId, lastUploadError } = await chrome.storage.local.get([
+    "lastSessionId",
+    "lastUploadError",
+  ]);
+  const url = $("backend").value.trim().replace(/\/$/, "");
+  document
+    .querySelectorAll('button[id^="stop-"]')
+    .forEach((b) => (b.disabled = false));
+  if (lastUploadError) setStatus(`Failed: ${lastUploadError}`, true);
+  else if (lastSessionId) setStatus(uploadedLink(url, lastSessionId));
+  else setStatus("Nothing was recording.");
+}
+
+$("include-mic").addEventListener("change", (e) =>
+  chrome.storage.local.set({ includeMic: e.target.checked })
+);
 
 $("start-tab").addEventListener("click", () => startRecording("tab"));
 $("stop-tab").addEventListener("click", () => stopRecording("tab"));

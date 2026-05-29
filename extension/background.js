@@ -35,10 +35,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     try {
       if (msg?.type === "start") {
         const source = msg.source ?? "tab";
+        // Tear down any leftover offscreen + stream first. Chrome's tabCapture
+        // refuses a second stream on the same tab ("active stream") until the
+        // old one is released.
+        await closeOffscreen();
         const startMsg = {
           type: "offscreen-start",
           source,
           backendUrl: msg.backendUrl,
+          includeMic: !!msg.includeMic,
         };
         if (source === "tab") {
           startMsg.streamId = await chrome.tabCapture.getMediaStreamId({
@@ -55,23 +60,37 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         });
         sendResponse({ ok: true });
       } else if (msg?.type === "stop") {
-        let resp = { ok: true, sessionId: null };
-        try {
-          if (await chrome.offscreen.hasDocument?.()) {
-            const r = await chrome.runtime.sendMessage({
-              type: "offscreen-stop",
+        // Kick off the upload in the background and return immediately. The
+        // popup might close before the upload finishes; persisting state via
+        // chrome.storage.local lets a re-opened popup pick up the result.
+        await setState({
+          stopping: true,
+          lastSessionId: null,
+          lastUploadError: null,
+        });
+        (async () => {
+          let result = { ok: true, sessionId: null };
+          try {
+            if (await chrome.offscreen.hasDocument?.()) {
+              const r = await chrome.runtime.sendMessage({
+                type: "offscreen-stop",
+              });
+              if (r) result = r;
+            }
+          } catch (err) {
+            result = { ok: false, error: err.message };
+          } finally {
+            await closeOffscreen();
+            await setState({
+              recording: false,
+              recordingSource: null,
+              stopping: false,
+              lastSessionId: result.ok ? result.sessionId ?? null : null,
+              lastUploadError: result.ok ? null : result.error ?? "unknown",
             });
-            if (r) resp = r;
           }
-        } finally {
-          await closeOffscreen();
-          await setState({
-            recording: false,
-            recordingSource: null,
-            lastSessionId: resp.sessionId ?? null,
-          });
-        }
-        sendResponse(resp);
+        })();
+        sendResponse({ ok: true, queued: true });
       }
     } catch (err) {
       await setState({ recording: false, recordingSource: null });

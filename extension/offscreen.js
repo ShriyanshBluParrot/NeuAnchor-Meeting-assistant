@@ -3,15 +3,11 @@
 
 let recorder = null;
 let chunks = [];
-let stream = null;
+let sourceStreams = []; // every raw stream we open, so Stop can release them
 let audioCtx = null;
 let backendUrl = "";
 
-async function getStream(source, streamId) {
-  if (source === "mic") {
-    return navigator.mediaDevices.getUserMedia({ audio: true });
-  }
-  // Tab capture.
+async function getTabStream(streamId) {
   return navigator.mediaDevices.getUserMedia({
     audio: {
       mandatory: {
@@ -22,19 +18,64 @@ async function getStream(source, streamId) {
   });
 }
 
-async function start(source, streamId, url) {
+async function getMicStream() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    if (
+      err.name === "NotAllowedError" ||
+      /dismissed|denied/i.test(err.message || "")
+    ) {
+      throw new Error(
+        "Microphone permission required. Allow it via the mic icon in the address bar, then try again."
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Build the final stream MediaRecorder will consume.
+ *
+ *   source=tab, includeMic=false → tab stream (also piped back to speakers
+ *                                 so the meeting stays audible)
+ *   source=tab, includeMic=true  → tab + mic mixed via Web Audio; tab is
+ *                                 still piped back to speakers, mic is not
+ *                                 (avoids feedback)
+ *   source=mic                   → mic stream only, not piped back
+ */
+async function buildRecordingStream(source, streamId, includeMic) {
+  if (source === "mic") {
+    const mic = await getMicStream();
+    sourceStreams.push(mic);
+    return mic;
+  }
+
+  // Tab path.
+  const tab = await getTabStream(streamId);
+  sourceStreams.push(tab);
+
+  audioCtx = new AudioContext();
+  const tabNode = audioCtx.createMediaStreamSource(tab);
+  // Keep the meeting audible.
+  tabNode.connect(audioCtx.destination);
+
+  if (!includeMic) return tab;
+
+  const mic = await getMicStream();
+  sourceStreams.push(mic);
+  const dest = audioCtx.createMediaStreamDestination();
+  tabNode.connect(dest);
+  audioCtx.createMediaStreamSource(mic).connect(dest);
+  return dest.stream;
+}
+
+async function start(source, streamId, url, includeMic) {
   backendUrl = url;
   chunks = [];
+  sourceStreams = [];
 
-  stream = await getStream(source, streamId);
-
-  // For tab capture, pipe the audio back to the user's speakers so the meeting
-  // stays audible while recording. Microphone capture doesn't need this and
-  // doing so would cause feedback.
-  if (source === "tab") {
-    audioCtx = new AudioContext();
-    audioCtx.createMediaStreamSource(stream).connect(audioCtx.destination);
-  }
+  const stream = await buildRecordingStream(source, streamId, includeMic);
 
   recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
   recorder.ondataavailable = (e) => {
@@ -52,10 +93,10 @@ async function stop() {
     recorder.onstop = () => resolve(new Blob(chunks, { type: "audio/webm" }));
     recorder.stop();
   });
-  stream?.getTracks().forEach((t) => t.stop());
+  sourceStreams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
   await audioCtx?.close();
   recorder = null;
-  stream = null;
+  sourceStreams = [];
   audioCtx = null;
 
   const form = new FormData();
@@ -73,7 +114,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
       if (msg?.type === "offscreen-start") {
-        await start(msg.source ?? "tab", msg.streamId, msg.backendUrl);
+        await start(
+          msg.source ?? "tab",
+          msg.streamId,
+          msg.backendUrl,
+          !!msg.includeMic
+        );
         sendResponse({ ok: true });
       } else if (msg?.type === "offscreen-stop") {
         const sessionId = await stop();
