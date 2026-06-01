@@ -1,6 +1,4 @@
 .env
-service-account.json
-*.db
 __pycache__/
 *.pyc
 
@@ -8,5 +6,7 @@ __pycache__/
 node_modules/
 dist/
 
-# local audio
+# local audio + sqlite
 *.wav
+*.webm
+*.db

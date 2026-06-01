@@ -1,9 +1,14 @@
-// Runs in an offscreen document — the only place in MV3 where MediaRecorder
-// and the legacy `chromeMediaSource: 'tab'` capture path are available.
+// Offscreen document — produces the audio blob, then handoff to background.
+//
+// Why two-step: Chrome can terminate an offscreen page once its "USER_MEDIA"
+// reason is no longer active (after the recorder stops). Doing the upload
+// here used to hang because the page died mid-fetch. Instead we build the
+// blob, base64-encode it, hand it to the service worker, and the service
+// worker performs the fetch — which is far more lifecycle-stable.
 
 let recorder = null;
 let chunks = [];
-let sourceStreams = []; // every raw stream we open, so Stop can release them
+let sourceStreams = [];
 let audioCtx = null;
 let backendUrl = "";
 
@@ -34,31 +39,18 @@ async function getMicStream() {
   }
 }
 
-/**
- * Build the final stream MediaRecorder will consume.
- *
- *   source=tab, includeMic=false → tab stream (also piped back to speakers
- *                                 so the meeting stays audible)
- *   source=tab, includeMic=true  → tab + mic mixed via Web Audio; tab is
- *                                 still piped back to speakers, mic is not
- *                                 (avoids feedback)
- *   source=mic                   → mic stream only, not piped back
- */
 async function buildRecordingStream(source, streamId, includeMic) {
   if (source === "mic") {
     const mic = await getMicStream();
     sourceStreams.push(mic);
     return mic;
   }
-
-  // Tab path.
   const tab = await getTabStream(streamId);
   sourceStreams.push(tab);
 
   audioCtx = new AudioContext();
   const tabNode = audioCtx.createMediaStreamSource(tab);
-  // Keep the meeting audible.
-  tabNode.connect(audioCtx.destination);
+  tabNode.connect(audioCtx.destination); // keep audible
 
   if (!includeMic) return tab;
 
@@ -76,41 +68,81 @@ async function start(source, streamId, url, includeMic) {
   sourceStreams = [];
 
   const stream = await buildRecordingStream(source, streamId, includeMic);
-
   recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
   recorder.ondataavailable = (e) => {
     if (e.data.size > 0) chunks.push(e.data);
   };
-  recorder.start(1000); // gather data every second so a crash loses less
+  recorder.start(1000);
+  console.log("[offscreen] recording started, source=", source);
 }
 
-async function stop() {
-  // Idempotent: a duplicate Stop click (or one fired after the popup reopened)
-  // shouldn't raise — just report no-op so the UI can recover gracefully.
-  if (!recorder) return null;
+async function stopAndBuildBlob() {
+  if (!recorder) {
+    throw new Error(
+      "No active recording — the extension may have been reloaded or the offscreen page was restarted. Please record again."
+    );
+  }
+  console.log("[offscreen] stopping recorder, chunks so far:", chunks.length);
 
+  // Race the onstop event against a hard timeout: some MediaRecorder/stream
+  // combinations intermittently fail to fire `onstop`.
   const blob = await new Promise((resolve) => {
-    recorder.onstop = () => resolve(new Blob(chunks, { type: "audio/webm" }));
-    recorder.stop();
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve(new Blob(chunks, { type: "audio/webm" }));
+    };
+    recorder.onstop = finish;
+    try {
+      recorder.stop();
+    } catch (err) {
+      console.warn("[offscreen] recorder.stop threw:", err);
+      finish();
+    }
+    setTimeout(() => {
+      if (!settled)
+        console.warn(
+          "[offscreen] onstop never fired after 10s — using existing chunks"
+        );
+      finish();
+    }, 10_000);
   });
-  sourceStreams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
-  await audioCtx?.close();
+  console.log("[offscreen] blob ready:", blob.size, "bytes");
+
+  // Release streams immediately — we've got the bytes, the page can be torn
+  // down by Chrome as soon as it likes; the background SW will own the upload.
+  try {
+    sourceStreams.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+    await audioCtx?.close();
+  } catch (e) {
+    console.warn("[offscreen] cleanup error (ignored):", e);
+  }
   recorder = null;
   sourceStreams = [];
   audioCtx = null;
 
-  const form = new FormData();
-  form.append("file", blob, "recording.webm");
-  const resp = await fetch(`${backendUrl}/meetings/upload`, {
-    method: "POST",
-    body: form,
+  if (blob.size === 0) throw new Error("Recording was empty (0 bytes).");
+  return blob;
+}
+
+async function blobToBase64(blob) {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result;
+      // strip "data:audio/webm;base64," prefix
+      const comma = url.indexOf(",");
+      resolve(url.slice(comma + 1));
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
   });
-  if (!resp.ok) throw new Error(`upload ${resp.status}: ${await resp.text()}`);
-  const data = await resp.json();
-  return data.session_id;
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type !== "offscreen-start" && msg?.type !== "offscreen-stop")
+    return false;
   (async () => {
     try {
       if (msg?.type === "offscreen-start") {
@@ -122,10 +154,33 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         );
         sendResponse({ ok: true });
       } else if (msg?.type === "offscreen-stop") {
-        const sessionId = await stop();
-        sendResponse({ ok: true, sessionId });
+        const blob = await stopAndBuildBlob();
+        const base64 = await blobToBase64(blob);
+        console.log("[offscreen] base64 ready, length:", base64.length);
+        // Hand off to background. We don't await a response — background
+        // writes the result directly into chrome.storage, which the popup
+        // observes.
+        chrome.runtime
+          .sendMessage({
+            type: "upload-blob",
+            base64,
+            contentType: "audio/webm",
+            backendUrl,
+          })
+          .catch(() => {});
+        sendResponse({ ok: true });
       }
     } catch (err) {
+      console.error("[offscreen] error:", err);
+      // Make sure the popup sees a failure instead of hanging forever.
+      try {
+        await chrome.storage.local.set({
+          recording: false,
+          recordingSource: null,
+          stopping: false,
+          lastUploadError: err.message || "offscreen failed",
+        });
+      } catch {}
       sendResponse({ ok: false, error: err.message });
     }
   })();

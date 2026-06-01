@@ -4,12 +4,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import chat, meetings, webhook
+from api import admin, chat, meetings, patients
 from config import get_settings
 from db import init_db
 
-# override=True so values in .env beat any stray vars already in the shell
-# (e.g. a GOOGLE_APPLICATION_CREDENTIALS pointing at another project's key).
+# override=True so values in .env take precedence over the shell.
 load_dotenv(override=True)
 
 
@@ -34,7 +33,8 @@ app.add_middleware(
 
 app.include_router(meetings.router)
 app.include_router(chat.router)
-app.include_router(webhook.router)
+app.include_router(patients.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

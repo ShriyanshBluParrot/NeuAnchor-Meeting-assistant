@@ -1,6 +1,15 @@
 const $ = (id) => document.getElementById(id);
 const statusEl = $("status");
 
+const DEFAULT_BACKEND_URL = "http://localhost:8000";
+// URLs that earlier builds of the extension stored. If any of them are still
+// in chrome.storage from an older install we silently migrate to the current
+// default. Anything the user typed by hand is preserved.
+const LEGACY_BACKEND_URLS = new Set([
+  "https://neuanchor.com/meeting-api",
+  "http://127.0.0.1:8000",
+]);
+
 function setStatus(text, isError = false) {
   statusEl.style.display = "block";
   statusEl.className = isError ? "status error" : "status";
@@ -44,6 +53,7 @@ function setRecordingUI(source, recording) {
 async function loadDefaults() {
   const {
     backendUrl,
+    patientEmail,
     recording,
     recordingSource,
     lastSessionId,
@@ -52,6 +62,7 @@ async function loadDefaults() {
     stopping,
   } = await chrome.storage.local.get([
     "backendUrl",
+    "patientEmail",
     "recording",
     "recordingSource",
     "lastSessionId",
@@ -59,18 +70,47 @@ async function loadDefaults() {
     "includeMic",
     "stopping",
   ]);
-  const url = backendUrl || "http://localhost:8000";
+  let url = backendUrl || DEFAULT_BACKEND_URL;
+  if (LEGACY_BACKEND_URLS.has(url)) {
+    url = DEFAULT_BACKEND_URL;
+    await chrome.storage.local.set({ backendUrl: url });
+  }
   $("backend").value = url;
+  $("email").value = patientEmail || "";
   $("include-mic").checked = !!includeMic;
 
-  if (recording && recordingSource) {
+  // Check `stopping` first: when the user clicks Stop, the background marks
+  // stopping=true but leaves recording=true until the offscreen page finishes
+  // the upload. Without this order, the popup would still show "Recording…"
+  // and the Stop button after a Stop click was already in progress.
+  if (stopping) {
+    // If the offscreen page is gone, the upload is lost — auto-clear the
+    // stale flag so the popup doesn't appear stuck forever after a previous
+    // bad run (e.g., extension reload mid-upload).
+    const liveness = await chrome.runtime.sendMessage({ type: "ping" }).catch(
+      () => null
+    );
+    if (!liveness?.offscreenAlive) {
+      await chrome.storage.local.set({
+        recording: false,
+        recordingSource: null,
+        stopping: false,
+        lastUploadError:
+          "Previous upload was lost (the recording page is no longer running). Start a new recording.",
+      });
+      setStatus(
+        "Previous upload was lost. Start a new recording.",
+        true
+      );
+      return;
+    }
+    if (recordingSource) showPanel(recordingSource);
+    setStatus("Stopping & uploading…");
+    watchForUploadCompletion();
+  } else if (recording && recordingSource) {
     showPanel(recordingSource);
     setRecordingUI(recordingSource, true);
     setStatus("Recording…");
-  } else if (stopping) {
-    // Upload is in progress in the background — keep showing it until done.
-    setStatus("Stopping & uploading…");
-    watchForUploadCompletion();
   } else if (lastUploadError) {
     setStatus(`Failed: ${lastUploadError}`, true);
   } else if (lastSessionId) {
@@ -79,10 +119,24 @@ async function loadDefaults() {
 }
 
 // ─── Start / Stop recording (tab or mic) ──────────────────────────────────
+function emailIsValid(s) {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+}
+
 async function startRecording(source) {
   const backendUrl = $("backend").value.trim().replace(/\/$/, "");
+  const patientEmail = $("email").value.trim().toLowerCase();
   if (!backendUrl) return setStatus("Enter a backend URL.", true);
-  await chrome.storage.local.set({ backendUrl });
+  if (!emailIsValid(patientEmail))
+    return setStatus("Enter a valid patient email.", true);
+
+  // Wipe any previous result/error so a stale message doesn't reappear.
+  await chrome.storage.local.set({
+    backendUrl,
+    patientEmail,
+    lastSessionId: null,
+    lastUploadError: null,
+  });
 
   $(`start-${source}`).disabled = true;
   setStatus("Starting…");
@@ -166,6 +220,10 @@ $("include-mic").addEventListener("change", (e) =>
   chrome.storage.local.set({ includeMic: e.target.checked })
 );
 
+$("email").addEventListener("change", (e) =>
+  chrome.storage.local.set({ patientEmail: e.target.value.trim().toLowerCase() })
+);
+
 $("start-tab").addEventListener("click", () => startRecording("tab"));
 $("stop-tab").addEventListener("click", () => stopRecording("tab"));
 $("start-mic").addEventListener("click", () => startRecording("mic"));
@@ -174,8 +232,11 @@ $("stop-mic").addEventListener("click", () => stopRecording("mic"));
 // ─── File upload ──────────────────────────────────────────────────────────
 $("start-upload").addEventListener("click", async () => {
   const backendUrl = $("backend").value.trim().replace(/\/$/, "");
+  const patientEmail = $("email").value.trim().toLowerCase();
   if (!backendUrl) return setStatus("Enter a backend URL.", true);
-  await chrome.storage.local.set({ backendUrl });
+  if (!emailIsValid(patientEmail))
+    return setStatus("Enter a valid patient email.", true);
+  await chrome.storage.local.set({ backendUrl, patientEmail });
 
   const file = $("file-input").files?.[0];
   if (!file) return setStatus("Pick a file first.", true);
@@ -186,6 +247,7 @@ $("start-upload").addEventListener("click", async () => {
   try {
     const form = new FormData();
     form.append("file", file, file.name);
+    form.append("email", patientEmail);
     const resp = await fetch(`${backendUrl}/meetings/upload`, {
       method: "POST",
       body: form,

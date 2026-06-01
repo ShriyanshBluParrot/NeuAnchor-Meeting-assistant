@@ -1,4 +1,4 @@
-# ── AI Meeting Assistant (GCP) ── backend requirements ──────────────────────
+# ── AI Meeting Assistant (MongoDB) ── backend requirements ──────────────────
 # Python >= 3.10 recommended
 
 # ── Web framework ───────────────────────────────────────────────────────────
@@ -8,21 +8,17 @@ python-multipart>=0.0.9          # form / file uploads
 sse-starlette>=2.1.0             # Server-Sent Events for streaming chat
 
 # ── Async + HTTP ────────────────────────────────────────────────────────────
-httpx>=0.27.0                    # async HTTP client (Recall.ai calls)
-aiosqlite>=0.20.0                # async SQLite session store
+httpx>=0.27.0                    # async HTTP client (AssemblyAI REST calls)
 
-# ── Recording (offline mic capture) ─────────────────────────────────────────
-sounddevice>=0.4.6               # microphone capture
-soundfile>=0.12.1                # write WAV files
-numpy>=1.26.0
+# ── MongoDB (storage + status) ──────────────────────────────────────────────
+motor>=3.4.0                     # async MongoDB driver
+pymongo>=4.6.0                   # bundled w/ motor; also used for ObjectId
 
 # ── Transcription ───────────────────────────────────────────────────────────
-assemblyai>=0.30.0               # AssemblyAI SDK (speaker diarization)
+# Uses AssemblyAI's REST API directly via httpx — no SDK dependency.
 
-# ── Google Cloud ────────────────────────────────────────────────────────────
-google-genai>=1.0.0              # Unified GenAI SDK (Gemini 2.5 Pro via Vertex)
-google-cloud-aiplatform>=1.60.0  # Vertex AI Vector Search + embeddings
-google-cloud-storage>=2.16.0     # GCS artifact storage
+# ── LLM ─────────────────────────────────────────────────────────────────────
+# Gemini called directly via REST API in core/gemini_client.py — no SDK.
 
 # ── Utilities ───────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0

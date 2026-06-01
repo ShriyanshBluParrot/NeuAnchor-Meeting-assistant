@@ -7,7 +7,6 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/meetings": "http://localhost:8000",
-      "/webhook": "http://localhost:8000",
       "/health": "http://localhost:8000",
     },
   },

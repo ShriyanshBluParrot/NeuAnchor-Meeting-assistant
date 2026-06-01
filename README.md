@@ -1,51 +1,51 @@
-# AI Meeting Assistant
+# NeuAnchor — AI Meeting Assistant
 
-Records Google Meet calls (online) or in-person meetings (offline), transcribes
-them with speaker diarization, and generates summaries, notes, and a RAG chat —
-all stored on Google Cloud.
+Records any meeting (Google Meet tab audio, microphone, or a pre-recorded
+file), transcribes it with speaker diarization, and generates a summary,
+action items, decisions, open questions, and an interactive chat over the
+transcript.
 
 ## Pipeline
 
 ```
-Online:  Meet link → Recall.ai bot → webhook → GCS audio
-Offline: Start/Stop mic recording → GCS audio
-            ↓
-AssemblyAI (speaker diarization) → Gemini 2.5 Pro (summary + notes)
-            ↓
-Google text-embedding-004 → Vertex AI Vector Search (RAG)
-            ↓
-All artifacts stored in GCS: audio.wav, transcript.json, summary.txt, notes.json
+Chrome extension ─▶ POST /meetings/upload
+                      │
+                      ├─ store audio in MongoDB GridFS
+                      ├─ AssemblyAI → speaker-labelled transcript
+                      ├─ Gemini 2.5 Pro → title + summary + notes
+                      ▼
+              MongoDB `meetings` document
+              { transcript, summary, notes, status: "ready" }
+                      │
+                      ▼
+              Frontend / extension reads it back
+              Chat panel streams Gemini answers over the transcript
 ```
 
 ## Tech stack
 
-- **Backend:** FastAPI (async)
+- **Backend:** FastAPI (async, Python 3.10+)
 - **Frontend:** React + Vite
-- **Meeting bot:** Recall.ai
-- **Transcription:** AssemblyAI (speaker diarization)
-- **LLM:** Gemini 2.5 Pro (Vertex AI)
-- **Embeddings:** `text-embedding-004` (Vertex AI)
-- **Vector DB:** Vertex AI Vector Search
-- **Storage:** Google Cloud Storage
-- **Status tracking:** SQLite
+- **Recording client:** Chrome extension (MV3, tab + mic + file modes)
+- **Transcription:** AssemblyAI (`universal-2`, speaker diarization)
+- **LLM:** Gemini 2.5 Pro via Google AI Studio API key
+- **Database / storage:** MongoDB Atlas — meeting docs + GridFS for audio
 
 ## Setup
 
 ### 1. Prerequisites
-- A GCP project with Vertex AI + Cloud Storage enabled
-- A Vertex AI Vector Search index + deployed index endpoint
-- Recall.ai and AssemblyAI API keys
-- A service-account JSON key with access to GCS + Vertex AI
-- `PortAudio` installed on the machine running offline recording
-  (`apt-get install libportaudio2` on Debian/Ubuntu)
+- A free [MongoDB Atlas](https://cloud.mongodb.com) cluster (M0 tier is fine)
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
+- An AssemblyAI API key
 
 ### 2. Backend
 ```bash
 cd backend
 pip install -r requirements.txt
-cp ../.env.example ../.env   # fill in your keys
+cp ../.env.example ../.env   # fill in MONGO_URI, GEMINI_API_KEY, ASSEMBLYAI_API_KEY
 uvicorn main:app --reload --port 8000
 ```
+Health check: `curl http://localhost:8000/health` → `{"status":"ok"}`.
 
 ### 3. Frontend
 ```bash
@@ -54,25 +54,40 @@ npm install
 npm run dev   # http://localhost:5173
 ```
 
-### 4. Webhook (online meetings)
-Recall.ai needs a public URL to deliver recordings. In development:
-```bash
-ngrok http 8000
-# set WEBHOOK_BASE_URL=https://<your-ngrok-id>.ngrok.io in .env
-```
+### 4. Chrome extension
+1. `chrome://extensions` → enable **Developer mode**
+2. **Load unpacked** → select `extension/`
+3. Pin the icon; backend URL field defaults to `http://localhost:8000`
 
 ## API
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/meetings/online` | `{meet_url}` → dispatch Recall.ai bot |
-| POST | `/meetings/offline/start` | Start mic recording |
-| POST | `/meetings/offline/stop` | `{session_id}` → stop + process |
-| GET | `/meetings/{id}/status` | Poll processing status |
-| GET | `/meetings/{id}` | Full transcript, summary, notes |
-| POST | `/meetings/{id}/chat` | `{question}` → streaming RAG answer (SSE) |
-| POST | `/webhook/recall` | Recall.ai callback |
+| POST | `/meetings/upload` | multipart audio upload → returns `{session_id}` |
+| GET  | `/meetings/{id}/status` | poll processing status |
+| GET  | `/meetings/{id}` | full transcript + summary + notes |
+| GET  | `/meetings/{id}/audio` | stream the recorded audio |
+| POST | `/meetings/{id}/chat` | `{question}` → streaming SSE answer |
+| GET  | `/meetings` | list all sessions |
 
-See `docs/superpowers/specs/` for the full design.
-# Neu-anchor
-# NeuAnchor-Meeting-assistant
+## Repo layout
+
+```
+backend/
+  main.py            FastAPI app + lifespan
+  config.py          env-driven settings
+  db.py              MongoDB meeting tracker
+  api/
+    meetings.py      upload + read endpoints
+    chat.py          streaming SSE chat
+  core/
+    mongo_client.py  shared async Mongo client / GridFS bucket
+    storage.py       GridFS audio helpers
+    transcriber.py   AssemblyAI REST client
+    summarizer.py    Gemini title / summary / notes
+    rag_engine.py    transcript-grounded chat
+    gemini_client.py shared Gemini client (API-key mode)
+    pipeline.py      orchestrates the post-upload pipeline
+frontend/            React + Vite UI
+extension/           Chrome MV3 recorder (tab / mic / file)
+```
