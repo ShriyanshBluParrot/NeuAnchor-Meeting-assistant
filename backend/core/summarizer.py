@@ -15,12 +15,24 @@ _SUMMARY_PROMPT = (
 )
 
 _NOTES_PROMPT = (
-    "From the meeting transcript below, extract structured notes. Return ONLY JSON "
+    "From the transcript below, extract structured notes. Return ONLY JSON "
     "matching this shape:\n"
     '{{"action_items": [{{"task": str, "owner": str, "deadline": str}}], '
-    '"decisions": [str], "questions": [str]}}\n'
-    "Use an empty string when an owner or deadline is unknown. Return an empty list "
-    "for a category with no items.\n\nTRANSCRIPT:\n{text}"
+    '"decisions": [str], "questions": [str]}}\n\n'
+    "Definitions (be generous — populate every category whenever possible):\n"
+    " - action_items: explicit tasks, follow-ups, or concrete next steps that anyone "
+    "needs to do. If the transcript is informational/educational, include "
+    "recommended actions or things the listener is encouraged to try.\n"
+    " - decisions: explicit decisions made, OR key takeaways / conclusions / "
+    "important facts asserted by the speakers. For educational content, include "
+    "the main concepts being defined.\n"
+    " - questions: open questions raised, OR questions the content explicitly "
+    "answers. For tutorials, list the implicit questions the content addresses "
+    '(e.g. "What is X?", "How does Y work?").\n\n'
+    "Use an empty string when an owner or deadline is unknown. Return empty "
+    "lists ONLY if the transcript is truly empty or unintelligible. Aim for "
+    "at least 1-3 entries per category for any meaningful transcript.\n\n"
+    "TRANSCRIPT:\n{text}"
 )
 
 
