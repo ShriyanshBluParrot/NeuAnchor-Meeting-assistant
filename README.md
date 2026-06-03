@@ -91,3 +91,4 @@ backend/
 frontend/            React + Vite UI
 extension/           Chrome MV3 recorder (tab / mic / file)
 ```
+# AI-Patient-Tool-for-Baks-Mam
